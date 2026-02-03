@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { TokenState, type Token } from '../types';
+import { type Token } from '../types';
 
 export function useQueue(serviceId: string | undefined) {
     const [token, setToken] = useState<Token | null>(null);
@@ -72,7 +72,7 @@ export function useQueue(serviceId: string | undefined) {
     }, [serviceId, userId]);
 
     // Actions
-    const joinQueue = async (lat: number, long: number) => {
+    const joinQueue = async (_lat: number, _long: number) => {
         setError(null);
         try {
             const { data, error: apiError } = await supabase.rpc('issue_token', {

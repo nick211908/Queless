@@ -46,4 +46,6 @@ class ToggleServiceRequest(BaseModel):
 async def toggle_service(request: ToggleServiceRequest):
     supabase = get_supabase()
     res = supabase.table("services").update({"status": request.status}).eq("id", str(request.service_id)).execute()
+    if not res.data:
+        return {"success": False, "message": "Service not found or update failed"}
     return {"success": True, "data": res.data}
