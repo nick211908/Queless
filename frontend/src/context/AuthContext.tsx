@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Session, User } from '@supabase/supabase-js';
 
+// Define API URL - in production this should be in env vars
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
 interface AuthContextType {
     session: Session | null;
     user: User | null;
@@ -24,18 +27,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [profile, setProfile] = useState<{ role: 'ADMIN' | 'USER' } | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const fetchProfile = async (userId: string) => {
+    const syncWithBackend = async (currentSession: Session) => {
         try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('role')
-                .eq('id', userId)
-                .single();
-            if (data) {
-                setProfile(data as any);
+            const response = await fetch(`${API_URL}/auth/exchange`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ access_token: currentSession.access_token }),
+            });
+
+            if (response.status === 401) {
+                console.warn("Session invalid/expired on backend. Signing out.");
+                await signOut();
+                return;
+            }
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error("Backend exchange failed:", response.status, errorText);
+                return;
+            }
+
+            const data = await response.json();
+            // Expected: { user: {...}, profile: { role: '...' } }
+            if (data.profile) {
+                setProfile(data.profile);
             }
         } catch (error) {
-            console.error("Error fetching profile:", error);
+            console.error("Error syncing with backend:", error);
         }
     };
 
@@ -44,8 +64,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setUser(session?.user ?? null);
-            if (session?.user) {
-                fetchProfile(session.user.id).then(() => setLoading(false));
+            if (session) {
+                syncWithBackend(session).then(() => setLoading(false));
             } else {
                 setLoading(false);
             }
@@ -57,20 +77,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
-            if (session?.user) {
-                fetchProfile(session.user.id); // Update profile on change
+            if (session) {
+                syncWithBackend(session);
             } else {
                 setProfile(null);
             }
-            setLoading(false);
+            if (_event === 'INITIAL_SESSION') {
+                // handled by getSession usually
+            } else {
+                setLoading(false);
+            }
         });
 
         return () => subscription.unsubscribe();
     }, []);
 
     const signOut = async () => {
-        await supabase.auth.signOut();
-        setProfile(null);
+        try {
+            await supabase.auth.signOut();
+        } catch (error) {
+            console.error("Error signing out (likely already expired):", error);
+        } finally {
+            setProfile(null);
+            setSession(null);
+            setUser(null);
+        }
     };
 
     return (

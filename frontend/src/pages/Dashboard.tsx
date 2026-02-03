@@ -9,8 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import {
     Plus, Building2, MapPin, Loader2, ArrowRight,
-    RefreshCw,
-    Trash2
+    RefreshCw
 } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 import { motion, AnimatePresence } from 'framer-motion';
