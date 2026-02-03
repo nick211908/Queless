@@ -1,23 +1,16 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { type Token } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 export function useQueue(serviceId: string | undefined) {
+    const { user } = useAuth();
+    const userId = user?.id; // Authenticated User ID
+
     const [token, setToken] = useState<Token | null>(null);
     const [queueTokens, setQueueTokens] = useState<Token[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    // Get or Create anonymous User ID
-    const getUserId = () => {
-        let uid = localStorage.getItem('queless_uid');
-        if (!uid) {
-            uid = crypto.randomUUID();
-            localStorage.setItem('queless_uid', uid);
-        }
-        return uid;
-    };
-    const userId = getUserId();
 
     // Initial Fetch & Subscription
     useEffect(() => {
@@ -43,19 +36,21 @@ export function useQueue(serviceId: string | undefined) {
                     setQueueTokens(data as Token[]);
 
                     // Find my token in the list
-                    const myToken = data.find((t: Token) => t.user_identifier === userId);
-                    if (myToken) {
-                        setToken(myToken);
-                    } else {
-                        // If not in the active list (e.g. state is CREATED or DONE, or just not loaded?),
-                        // try fetching specifically for me.
-                        const { data: myData } = await supabase
-                            .from('tokens')
-                            .select('*')
-                            .eq('service_id', serviceId)
-                            .eq('user_identifier', userId)
-                            .maybeSingle();
-                        if (myData) setToken(myData as Token);
+                    if (userId) {
+                        const myToken = data.find((t: Token) => t.user_identifier === userId);
+                        if (myToken) {
+                            setToken(myToken);
+                        } else {
+                            // If not in the active list (e.g. state is CREATED or DONE, or just not loaded?),
+                            // try fetching specifically for me.
+                            const { data: myData } = await supabase
+                                .from('tokens')
+                                .select('*')
+                                .eq('service_id', serviceId)
+                                .eq('user_identifier', userId)
+                                .maybeSingle();
+                            if (myData) setToken(myData as Token);
+                        }
                     }
                 }
             } catch (err: any) {
@@ -111,10 +106,12 @@ export function useQueue(serviceId: string | undefined) {
                     });
 
                     // Update My Token Logic
-                    if (newRecord && newRecord.user_identifier === userId) {
-                        setToken(newRecord);
-                    } else if (eventType === 'DELETE' && oldRecord.id === token?.id) {
-                        setToken(null);
+                    if (userId) {
+                        if (newRecord && newRecord.user_identifier === userId) {
+                            setToken(newRecord);
+                        } else if (eventType === 'DELETE' && oldRecord.id === token?.id) {
+                            setToken(null);
+                        }
                     }
                 }
             )
@@ -123,7 +120,7 @@ export function useQueue(serviceId: string | undefined) {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [serviceId, userId]); // Check if 'token?.id' dependency needed? Re-evaluated inside callback.
+    }, [serviceId, userId]); // Re-run if user logs in/out
 
     // Calculate People Ahead
     // Logic: My Index in the ACTIVE list.
@@ -134,18 +131,21 @@ export function useQueue(serviceId: string | undefined) {
         const idx = queueTokens.findIndex(t => t.id === token.id);
         if (idx !== -1) {
             peopleAhead = idx; // 0 means I am at the front (or serving)
-            // If the first person is 'SERVING', they are technically "ahead" of someone waiting?
-            // Yes. If I am index 1, there is 1 person ahead (index 0).
         }
     }
 
     // Actions
     const joinQueue = async (_lat: number, _long: number) => {
         setError(null);
+        if (!userId) {
+            setError("You must be logged in to join the queue.");
+            return;
+        }
+
         try {
             const { data, error: apiError } = await supabase.rpc('issue_token', {
-                p_service_id: serviceId,
-                p_user_id: userId
+                p_service_id: serviceId
+                // p_user_id removed, handled by auth context in backend
             });
 
             if (apiError) throw apiError;

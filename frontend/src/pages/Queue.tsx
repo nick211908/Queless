@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQueue } from '../hooks/useQueue';
+import { useAuth } from '../context/AuthContext';
 import QRCode from 'react-qr-code';
 import { TokenState } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,8 +13,16 @@ import { MapPin, CheckCircle2, Bell, Scan, PartyPopper, Loader2 } from 'lucide-r
 
 const Queue: React.FC = () => {
     const { serviceId } = useParams<{ serviceId: string }>();
+    const { user, loading: authLoading } = useAuth();
+    const navigate = useNavigate();
     const { token, loading, error, joinQueue, confirmPresence, peopleAhead } = useQueue(serviceId);
     const [locating, setLocating] = useState(false);
+
+    useEffect(() => {
+        if (!authLoading && !user) {
+            navigate('/auth');
+        }
+    }, [user, authLoading, navigate]);
 
     // Auto-Verify Prompt if Next or Second Next
     // We won't auto-verify without permission, but we will Show the prompt prominently.

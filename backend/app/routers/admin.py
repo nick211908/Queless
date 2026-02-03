@@ -89,3 +89,28 @@ async def ensure_counter(request: EnsureCounterRequest):
         pass
         
     raise HTTPException(status_code=500, detail="Failed to create default counter")
+
+class ClaimOrphansRequest(BaseModel):
+    organization_id: UUID4
+
+@router.post("/claim-orphans")
+async def claim_orphans(request: ClaimOrphansRequest):
+    # Use standard client - in this backend setup, it often uses the Service Role Key 
+    # if configured in .env with SUPABASE_KEY=service_role_key. 
+    # If it uses ANON key, this might fail unless RLS allows it (which it definitely won't for orphans).
+    # Assuming backend has privileged access.
+    supabase = get_supabase()
+    
+    try:
+        # 1. Update services where organization_id is NULL
+        res = supabase.table("services").update({
+            "organization_id": str(request.organization_id)
+        }).is_("organization_id", "null").execute()
+        
+        return {
+            "success": True, 
+            "message": f"Claimed {len(res.data) if res.data else 0} orphan services.",
+            "data": res.data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

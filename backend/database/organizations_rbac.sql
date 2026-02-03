@@ -61,7 +61,7 @@ create policy "Members can view their organizations"
 
 create policy "Users can create organizations"
   on public.organizations for insert
-  with check (auth.uid() = owner_id);
+  with check (false); -- Disabled public creation. Only DB/Admin can create.
 
 create policy "Owners can update their organizations"
   on public.organizations for update

@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Service } from '../types';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import PageTransition from '@/components/PageTransition';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, Sparkles, Lock } from 'lucide-react';
 
 const Home: React.FC = () => {
+    const { user, profile } = useAuth();
     const [services, setServices] = useState<Service[]>([]);
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const navigate = useNavigate();
 
     useEffect(() => {
         async function fetchServices() {
@@ -87,9 +91,29 @@ const Home: React.FC = () => {
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
-                    className="mb-8"
+                    className="mb-8 relative"
                 >
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="absolute right-0 top-0 flex gap-2">
+                        {user ? (
+                            <>
+                                {profile?.role === 'ADMIN' && (
+                                    <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')} className="text-primary hover:text-primary/80">
+                                        Dashboard
+                                    </Button>
+                                )}
+                                <Button variant="ghost" size="sm" onClick={() => supabase.auth.signOut()} className="text-muted-foreground hover:text-destructive">
+                                    Logout
+                                </Button>
+                            </>
+                        ) : (
+                            <Button variant="ghost" size="sm" onClick={() => navigate('/auth')} className="text-muted-foreground hover:text-primary">
+                                <Lock className="w-4 h-4 mr-2" />
+                                Admin Login
+                            </Button>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-2 pt-2">
                         <Sparkles className="w-8 h-8 text-primary" />
                         <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
                             QueueLess+
@@ -171,12 +195,13 @@ const Home: React.FC = () => {
                     className="mt-12 pt-6 border-t border-border text-center space-y-2"
                 >
                     <p className="text-muted-foreground text-sm">QueueLess+ MVP</p>
-                    {services.length > 0 && (
+                    {/* Only show direct Admin link if logged in as Admin */}
+                    {user && profile?.role === 'ADMIN' && services.length > 0 && (
                         <Link
                             to={`/admin/${services[0].id}`}
                             className="text-xs text-muted-foreground hover:text-primary transition-colors inline-block"
                         >
-                            Admin Dashboard (Demo)
+                            Manage Service (Quick Access)
                         </Link>
                     )}
                 </motion.footer>

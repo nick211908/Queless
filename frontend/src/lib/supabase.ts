@@ -7,4 +7,11 @@ if (!supabaseUrl || !supabaseKey) {
     throw new Error('Missing Supabase Environment Variables');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        storage: localStorage,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+    }
+});

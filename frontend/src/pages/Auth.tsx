@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +11,19 @@ import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 
 const Auth: React.FC = () => {
+    const { user, profile } = useAuth(); // Get user and profile
     const navigate = useNavigate();
+
+    useEffect(() => {
+        if (user && profile) {
+            if (profile.role === 'ADMIN') {
+                navigate('/dashboard');
+            } else {
+                navigate('/');
+            }
+        }
+    }, [user, profile, navigate]);
+
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -32,14 +45,17 @@ const Auth: React.FC = () => {
                     password,
                 });
                 if (error) throw error;
-                navigate('/dashboard');
+                // Redirect based on role (fetched by Context, but we can't reliably get 'profile' effectively inside this generic function immediately after login without a small delay or just rely on the effect hook above)
+                // Actually, the Effect hook in Auth.tsx (which I need to update) should handle navigation.
+                // So I will REMOVE the navigate call here and let the Effect handle it.
+                // navigate('/dashboard'); 
             } else {
                 const { error } = await supabase.auth.signUp({
                     email,
                     password,
                 });
                 if (error) throw error;
-                setSuccessMsg('Account created! Please check your email to confirm.');
+                setSuccessMsg('Account created! You can now login.');
             }
         } catch (err: any) {
             setError(err.message);
@@ -59,7 +75,7 @@ const Auth: React.FC = () => {
                         <CardDescription>
                             {isLogin
                                 ? 'Enter your credentials to access your account'
-                                : 'Sign up to start managing queues'}
+                                : 'Sign up to start using QueueLess+'}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>

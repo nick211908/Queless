@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Service, Token } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -23,11 +24,19 @@ import { cn } from '@/lib/utils';
 
 const Admin: React.FC = () => {
     const { serviceId } = useParams<{ serviceId: string }>();
+    const { user, loading: authLoading } = useAuth();
+    const navigate = useNavigate();
     const [service, setService] = useState<Service | null>(null);
     const [tokens, setTokens] = useState<Token[]>([]);
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [calling, setCalling] = useState(false);
+
+    useEffect(() => {
+        if (!authLoading && !user) {
+            navigate('/auth');
+        }
+    }, [user, authLoading, navigate]);
 
     // QR Scanning State
     const [scanMode, setScanMode] = useState(false);
@@ -39,6 +48,9 @@ const Admin: React.FC = () => {
     useEffect(() => {
         async function init() {
             if (!serviceId) return;
+            if (authLoading) return; // Wait for auth check
+            if (!user) return;       // Will redirect via other effect
+
             try {
                 // 1. Get Service
                 const { data: svc, error: svcErr } = await supabase.from('services').select('*').eq('id', serviceId).maybeSingle();
@@ -93,7 +105,7 @@ const Admin: React.FC = () => {
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
-    }, [serviceId]);
+    }, [serviceId, user, authLoading]);
 
     const fetchTokens = async () => {
         const { data } = await supabase.from('tokens').select('*')

@@ -7,7 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Building2, MapPin, Loader2, ArrowRight } from 'lucide-react';
+import {
+    Plus, Building2, MapPin, Loader2, ArrowRight,
+    RefreshCw,
+    Trash2
+} from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -27,7 +31,7 @@ interface Service {
 }
 
 const Dashboard: React.FC = () => {
-    const { user, loading: authLoading } = useAuth();
+    const { user, profile, loading: authLoading } = useAuth();
     const navigate = useNavigate();
 
     const [orgs, setOrgs] = useState<Organization[]>([]);
@@ -71,31 +75,27 @@ const Dashboard: React.FC = () => {
             navigate('/auth');
             return;
         }
+
+        // Redirect non-admins to Home
+        if (profile?.role !== 'ADMIN') {
+            navigate('/');
+            return;
+        }
+
         fetchData();
 
-        // Realtime Subscription for Services
         const channel = supabase.channel('dashboard-services')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, (payload) => {
                 if (payload.eventType === 'INSERT') {
                     const svc = payload.new as Service;
-                    setServices(prev => ({
-                        ...prev,
-                        [svc.organization_id]: [...(prev[svc.organization_id] || []), svc]
-                    }));
+                    setServices(prev => ({ ...prev, [svc.organization_id]: [...(prev[svc.organization_id] || []), svc] }));
                 } else if (payload.eventType === 'UPDATE') {
                     const svc = payload.new as Service;
-                    setServices(prev => ({
-                        ...prev,
-                        [svc.organization_id]: (prev[svc.organization_id] || []).map(s => s.id === svc.id ? svc : s)
-                    }));
+                    setServices(prev => ({ ...prev, [svc.organization_id]: (prev[svc.organization_id] || []).map(s => s.id === svc.id ? svc : s) }));
                 } else if (payload.eventType === 'DELETE') {
                     setServices(prev => {
                         const next = { ...prev };
-                        // We don't know the orgId easily from 'old' if it's just ID, so we filter all
-                        // In practice, RLS usually sends 'old' with some data if Replica Identity is FULL, but ID is standard.
-                        Object.keys(next).forEach(orgId => {
-                            next[orgId] = next[orgId].filter(s => s.id !== payload.old.id);
-                        });
+                        Object.keys(next).forEach(orgId => { next[orgId] = next[orgId].filter(s => s.id !== payload.old.id); });
                         return next;
                     });
                 }
@@ -103,7 +103,11 @@ const Dashboard: React.FC = () => {
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
-    }, [user, authLoading]);
+    }, [user, profile, authLoading]);
+
+    // I need to update the destructuring first.
+    // This replace block is just checking the existing code.
+    // I will replace the component start to include 'profile' and the check.
 
     const fetchData = async () => {
         setLoading(true);
@@ -208,6 +212,38 @@ const Dashboard: React.FC = () => {
         }
     };
 
+    const claimOrphans = async () => {
+        if (!orgs.length) {
+            alert("No organization found to claim services for.");
+            return;
+        }
+        const orgId = orgs[0].id; // Claim for the first org
+
+        if (!confirm("This will find all 'orphan' services (no organization) and assign them to your organization. Continue?")) return;
+
+        setLoading(true);
+        try {
+            const res = await fetch('http://localhost:8000/api/v1/admin/claim-orphans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ organization_id: orgId })
+            });
+            const json = await res.json();
+            if (json.success) {
+                alert(json.message);
+                // Refresh to show them
+                fetchData();
+            } else {
+                throw new Error(json.message || 'Failed to claim orphans');
+            }
+        } catch (err: any) {
+            console.error(err);
+            alert(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     if (authLoading || loading) {
         return <div className="flex justify-center items-center h-[50vh]"><Loader2 className="animate-spin text-purple-600" /></div>;
     }
@@ -222,6 +258,10 @@ const Dashboard: React.FC = () => {
                         </h1>
                         <p className="text-muted-foreground">Manage your organization and services</p>
                     </div>
+                    <Button onClick={claimOrphans} variant="outline" size="sm" className="gap-2">
+                        <RefreshCw className="w-4 h-4" />
+                        Recover Lost Services
+                    </Button>
                 </div>
 
                 <div className="space-y-4">
