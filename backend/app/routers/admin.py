@@ -49,3 +49,17 @@ async def toggle_service(request: ToggleServiceRequest):
     if not res.data:
         return {"success": False, "message": "Service not found or update failed"}
     return {"success": True, "data": res.data}
+
+class CompleteTokenRequest(BaseModel):
+    token_id: UUID4
+
+@router.post("/complete-token")
+async def complete_token(request: CompleteTokenRequest):
+    supabase = get_supabase()
+    # Mark as DONE
+    res = supabase.table("tokens").update({"state": "DONE"}).eq("id", str(request.token_id)).execute()
+    
+    if not res.data:
+        return {"success": False, "message": "Token not found or already completed"}
+        
+    return {"success": True, "token": res.data[0]}

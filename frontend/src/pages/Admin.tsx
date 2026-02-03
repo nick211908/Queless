@@ -8,13 +8,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import PageTransition from '@/components/PageTransition';
+import QRScanner from '@/components/QRScanner';
 import {
     Play,
     Pause,
     Megaphone,
     Trash2,
     Users,
-    AlertCircle
+    AlertCircle,
+    Scan,
+    X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +28,10 @@ const Admin: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [calling, setCalling] = useState(false);
+
+    // QR Scanning State
+    const [scanMode, setScanMode] = useState(false);
+    const [processingScan, setProcessingScan] = useState(false);
 
     // Hardcoded Counter ID for MVP (Admin represents Counter 1)
     const [counterId, setCounterId] = useState<string | null>(null);
@@ -132,6 +139,34 @@ const Admin: React.FC = () => {
         }
     };
 
+    const handleQRScan = async (scannedText: string) => {
+        if (processingScan) return;
+        setProcessingScan(true);
+
+        try {
+            // Assume scannedText is the token UUID
+            const res = await fetch('http://localhost:8000/api/v1/admin/complete-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token_id: scannedText })
+            });
+
+            const json = await res.json();
+            if (json.success) {
+                // Success!
+                setScanMode(false);
+                // Optional: Show success toast/alert
+                alert(`User #${json.token.token_number} cleared successfully!`);
+            } else {
+                alert(`Error: ${json.message}`);
+            }
+        } catch (err: any) {
+            alert("Scan processing failed: " + err.message);
+        } finally {
+            setProcessingScan(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="p-8 space-y-6">
@@ -173,6 +208,42 @@ const Admin: React.FC = () => {
     return (
         <PageTransition>
             <div className="p-6 pb-20">
+                {/* QR Scanner Modal */}
+                {scanMode && (
+                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="w-full max-w-md"
+                        >
+                            <Card className="relative overflow-hidden">
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute right-2 top-2 z-10 hover:bg-slate-100 rounded-full"
+                                    onClick={() => setScanMode(false)}
+                                >
+                                    <X className="w-5 h-5" />
+                                </Button>
+                                <CardHeader className="text-center pb-2">
+                                    <CardTitle>Scan User QR</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="bg-slate-50 rounded-lg p-1">
+                                        <QRScanner
+                                            onResult={handleQRScan}
+                                            onError={(err) => console.log(err)}
+                                        />
+                                    </div>
+                                    <p className="text-center text-sm text-muted-foreground mt-4">
+                                        Scan the QR code on the user's screen to complete their service.
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    </div>
+                )}
+
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
@@ -185,16 +256,26 @@ const Admin: React.FC = () => {
                             </Badge>
                         </p>
                     </div>
-                    {service && (
+                    <div className="flex gap-2">
                         <Button
-                            onClick={toggleService}
-                            variant={service.status === 'OPEN' ? 'destructive' : 'default'}
-                            className="gap-2"
+                            onClick={() => setScanMode(true)}
+                            variant="outline"
+                            className="gap-2 border-indigo-200 hover:bg-indigo-50 text-indigo-700"
                         >
-                            {service.status === 'OPEN' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                            {service.status === 'OPEN' ? 'Pause Service' : 'Resume Service'}
+                            <Scan className="w-4 h-4" />
+                            Scan User
                         </Button>
-                    )}
+                        {service && (
+                            <Button
+                                onClick={toggleService}
+                                variant={service.status === 'OPEN' ? 'destructive' : 'default'}
+                                className="gap-2"
+                            >
+                                {service.status === 'OPEN' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                {service.status === 'OPEN' ? 'Pause' : 'Resume'}
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
                 <div className="grid gap-8">
@@ -209,16 +290,28 @@ const Admin: React.FC = () => {
                         <CardContent>
                             <div className="flex flex-col items-center gap-4">
                                 {activeToken ? (
-                                    <div className="text-center w-full bg-white p-6 rounded-xl border border-indigo-100 shadow-sm">
-                                        <p className="text-sm text-muted-foreground">Currently Serving</p>
-                                        <div className="text-6xl font-black text-indigo-600 my-2">#{activeToken.token_number}</div>
-                                        <Badge variant="outline" className="text-lg py-1 px-4">{activeToken.state}</Badge>
-                                        <div className="mt-6 flex justify-center gap-4">
-                                            <Button variant="outline" onClick={() => callNext()} disabled={calling}>
-                                                Call Next
+                                    <div className="text-center w-full bg-white p-6 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-green-500 animate-pulse"></div>
+                                        <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Currently Serving</p>
+                                        <div className="text-7xl font-black text-indigo-600 my-4 tracking-tighter">#{activeToken.token_number}</div>
+                                        <Badge variant="outline" className="text-lg py-1 px-6 border-indigo-200 text-indigo-700 bg-indigo-50 mb-6">{activeToken.state}</Badge>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <Button
+                                                onClick={() => setScanMode(true)}
+                                                size="lg"
+                                                className="bg-green-600 hover:bg-green-700 text-white shadow-green-200 shadow-lg"
+                                            >
+                                                <Scan className="w-4 h-4 mr-2" />
+                                                Finish (Scan)
                                             </Button>
-                                            <Button variant="ghost" className="text-red-500 hover:text-red-600" onClick={() => cancelToken(activeToken.id)}>
-                                                Cancel/Skip
+                                            <Button
+                                                variant="outline"
+                                                size="lg"
+                                                className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+                                                onClick={() => cancelToken(activeToken.id)}
+                                            >
+                                                Skip / Cancel
                                             </Button>
                                         </div>
                                     </div>
@@ -227,7 +320,7 @@ const Admin: React.FC = () => {
                                         onClick={callNext}
                                         disabled={calling || tokens.length === 0}
                                         size="lg"
-                                        className="w-full h-24 text-2xl font-bold rounded-xl shadow-xl shadow-indigo-200 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                                        className="w-full h-24 text-2xl font-bold rounded-xl shadow-xl shadow-indigo-200 transition-all hover:scale-[1.01] active:scale-[0.99] bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700"
                                     >
                                         {calling ? (
                                             <div className="flex items-center gap-2">
