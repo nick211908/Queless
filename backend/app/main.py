@@ -17,11 +17,12 @@ app.add_middleware(
 )
 
 # Placeholder for router inclusion
-from app.routers import queue, presence, service_flow, admin
+from app.routers import queue, presence, service_flow, admin, organizations
 app.include_router(queue.router, prefix=f"{settings.API_V1_STR}/queue", tags=["Queue"])
 app.include_router(presence.router, prefix=f"{settings.API_V1_STR}/presence", tags=["Presence"])
 app.include_router(service_flow.router, prefix=f"{settings.API_V1_STR}/flow", tags=["Service Flow"])
 app.include_router(admin.router, prefix=f"{settings.API_V1_STR}/admin", tags=["Admin"])
+app.include_router(organizations.router, prefix=f"{settings.API_V1_STR}/organizations", tags=["Organizations"])
 
 @app.get("/")
 async def root():

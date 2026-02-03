@@ -4,6 +4,7 @@ import { type Token } from '../types';
 
 export function useQueue(serviceId: string | undefined) {
     const [token, setToken] = useState<Token | null>(null);
+    const [queueTokens, setQueueTokens] = useState<Token[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -22,45 +23,98 @@ export function useQueue(serviceId: string | undefined) {
     useEffect(() => {
         if (!serviceId) return;
 
-        // 1. Fetch existing active token
-        const fetchToken = async () => {
+        // 1. Fetch ALL active tokens (including mine and others)
+        const fetchTokens = async () => {
             setLoading(true);
-            const { data, error } = await supabase
-                .from('tokens')
-                .select('*')
-                .eq('service_id', serviceId)
-                .eq('user_identifier', userId)
-                .in('state', [
-                    'CREATED', 'WAITING', 'NEAR', 'CONFIRMING', 'CONFIRMED', 'CALLED', 'SERVING'
-                ])
-                .maybeSingle();
+            try {
+                // Fetch context: Who is WAITING, SERVING, etc.
+                const { data, error } = await supabase
+                    .from('tokens')
+                    .select('*')
+                    .eq('service_id', serviceId)
+                    .in('state', [
+                        'WAITING', 'NEAR', 'CONFIRMED', 'CALLED', 'SERVING'
+                    ])
+                    .order('token_number', { ascending: true });
 
-            if (error) {
-                console.error('Fetch error:', error);
+                if (error) throw error;
+
+                if (data) {
+                    setQueueTokens(data as Token[]);
+
+                    // Find my token in the list
+                    const myToken = data.find((t: Token) => t.user_identifier === userId);
+                    if (myToken) {
+                        setToken(myToken);
+                    } else {
+                        // If not in the active list (e.g. state is CREATED or DONE, or just not loaded?),
+                        // try fetching specifically for me.
+                        const { data: myData } = await supabase
+                            .from('tokens')
+                            .select('*')
+                            .eq('service_id', serviceId)
+                            .eq('user_identifier', userId)
+                            .maybeSingle();
+                        if (myData) setToken(myData as Token);
+                    }
+                }
+            } catch (err: any) {
+                console.error('Fetch error:', err);
+                setError(err.message);
+            } finally {
+                setLoading(false);
             }
-            if (data) {
-                setToken(data as Token);
-            }
-            setLoading(false);
         };
 
-        fetchToken();
+        fetchTokens();
 
-        // 2. Real-time Subscription
+        // 2. Real-time Subscription for Queue Updates
         const channel = supabase
-            .channel('queue-updates')
+            .channel('queue-global-updates')
             .on(
                 'postgres_changes',
                 {
-                    event: 'UPDATE',
+                    event: '*',
                     schema: 'public',
                     table: 'tokens',
                     filter: `service_id=eq.${serviceId}`,
                 },
                 (payload) => {
-                    const newToken = payload.new as Token;
-                    if (newToken.user_identifier === userId) {
-                        setToken(newToken);
+                    const newRecord = payload.new as Token;
+                    const oldRecord = payload.old as Token;
+                    const eventType = payload.eventType;
+
+                    // Update Array Logic
+                    setQueueTokens(prev => {
+                        let next = [...prev];
+
+                        if (eventType === 'INSERT') {
+                            if (['WAITING', 'NEAR', 'CONFIRMED', 'CALLED', 'SERVING'].includes(newRecord.state)) {
+                                next.push(newRecord);
+                            }
+                        } else if (eventType === 'UPDATE') {
+                            // If new state is invalid, remove it. Else update.
+                            const isActive = ['WAITING', 'NEAR', 'CONFIRMED', 'CALLED', 'SERVING'].includes(newRecord.state);
+                            if (!isActive) {
+                                next = next.filter(t => t.id !== newRecord.id);
+                            } else {
+                                const idx = next.findIndex(t => t.id === newRecord.id);
+                                if (idx !== -1) next[idx] = newRecord;
+                                else next.push(newRecord);
+                            }
+                        } else if (eventType === 'DELETE') {
+                            next = next.filter(t => t.id !== oldRecord.id);
+                        }
+
+                        // Maintain Sort
+                        return next.sort((a, b) => a.token_number - b.token_number);
+                    });
+
+                    // Update My Token Logic
+                    if (newRecord && newRecord.user_identifier === userId) {
+                        setToken(newRecord);
+                    } else if (eventType === 'DELETE' && oldRecord.id === token?.id) {
+                        setToken(null);
                     }
                 }
             )
@@ -69,7 +123,21 @@ export function useQueue(serviceId: string | undefined) {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [serviceId, userId]);
+    }, [serviceId, userId]); // Check if 'token?.id' dependency needed? Re-evaluated inside callback.
+
+    // Calculate People Ahead
+    // Logic: My Index in the ACTIVE list.
+    // If I am waiting, and there are 5 people active ahead of me.
+    let peopleAhead = -1;
+    if (token && queueTokens.length > 0) {
+        // Only count if I'm in the list
+        const idx = queueTokens.findIndex(t => t.id === token.id);
+        if (idx !== -1) {
+            peopleAhead = idx; // 0 means I am at the front (or serving)
+            // If the first person is 'SERVING', they are technically "ahead" of someone waiting?
+            // Yes. If I am index 1, there is 1 person ahead (index 0).
+        }
+    }
 
     // Actions
     const joinQueue = async (_lat: number, _long: number) => {
@@ -81,10 +149,8 @@ export function useQueue(serviceId: string | undefined) {
             });
 
             if (apiError) throw apiError;
-            // We don't set token here immediately, we wait for RPC response or subscription?
-            // RPC returns the token, so update state.
+            // RPC returns the token
             if (data) setToken(data as Token);
-
         } catch (err: any) {
             setError(err.message || 'Failed to join queue');
         }
@@ -93,15 +159,6 @@ export function useQueue(serviceId: string | undefined) {
     const confirmPresence = async (lat: number, long: number) => {
         setError(null);
         if (!token) return;
-
-        // Call backend API (FastAPI) or RPC directly? 
-        // We implemented `verify` endpoint in FastAPI `routers/presence.py` which does Logic + RPC.
-        // Ideally we call FastAPI. But for simplicity in this MVP without proxy setup, we can attempt RPC or standard fetch.
-        // However, `verify_presence` has logic (Geo check) in Python. 
-        // If we call RPC `confirm_token` directly, we skip Geo check!
-        // So we MUST call FastAPI.
-        // Assuming FastAPI is at localhost:8000.
-
         try {
             const res = await fetch('http://localhost:8000/api/v1/presence/verify', {
                 method: 'POST',
@@ -113,13 +170,18 @@ export function useQueue(serviceId: string | undefined) {
                 })
             });
             const json = await res.json();
-            if (!res.ok) throw new Error(json.detail || 'Verification failed');
+            // Important: Check OK response
+            if (!res.ok) {
+                const detail = json.detail || 'Verification request failed';
+                throw new Error(detail);
+            }
 
             if (json.success === false) {
+                // Logic rejected it (e.g. too far)
                 throw new Error(json.message || 'Verification rejected by server.');
             }
 
-            // Success! Manually refresh signal to ensure UI updates immediately
+            // Success! Refresh
             const { data } = await supabase.from('tokens').select('*').eq('id', token.id).single();
             if (data) setToken(data as Token);
         } catch (err: any) {
@@ -133,6 +195,8 @@ export function useQueue(serviceId: string | undefined) {
         error,
         userId,
         joinQueue,
-        confirmPresence
+        confirmPresence,
+        queueTokens,
+        peopleAhead
     };
 }

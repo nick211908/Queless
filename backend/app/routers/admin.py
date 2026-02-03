@@ -63,3 +63,29 @@ async def complete_token(request: CompleteTokenRequest):
         return {"success": False, "message": "Token not found or already completed"}
         
     return {"success": True, "token": res.data[0]}
+
+class EnsureCounterRequest(BaseModel):
+    service_id: UUID4
+
+@router.post("/ensure-counter")
+async def ensure_counter(request: EnsureCounterRequest):
+    supabase = get_supabase()
+    # Check if exists
+    res = supabase.table("counters").select("*").eq("service_id", str(request.service_id)).limit(1).execute()
+    if res.data and len(res.data) > 0:
+        return {"success": True, "counter": res.data[0]}
+    
+    # Create
+    try:
+        new_res = supabase.table("counters").insert({
+            "service_id": str(request.service_id), 
+            "name": "Counter 1"
+        }).execute()
+        
+        if new_res.data:
+             return {"success": True, "counter": new_res.data[0]}
+    except Exception as e:
+        print(f"Error creating counter: {e}")
+        pass
+        
+    raise HTTPException(status_code=500, detail="Failed to create default counter")

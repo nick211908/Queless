@@ -8,12 +8,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PageTransition from '@/components/PageTransition';
-import { MapPin, CheckCircle2, Bell, Scan, PartyPopper } from 'lucide-react';
+import { MapPin, CheckCircle2, Bell, Scan, PartyPopper, Loader2 } from 'lucide-react';
 
 const Queue: React.FC = () => {
     const { serviceId } = useParams<{ serviceId: string }>();
-    const { token, loading, error, joinQueue, confirmPresence } = useQueue(serviceId);
+    const { token, loading, error, joinQueue, confirmPresence, peopleAhead } = useQueue(serviceId);
     const [locating, setLocating] = useState(false);
+
+    // Auto-Verify Prompt if Next or Second Next
+    // We won't auto-verify without permission, but we will Show the prompt prominently.
+    // 'peopleAhead' index: 0 = Serving, 1 = Next, 2 = Second.
+    const isNext = peopleAhead === 1;
+    const isSecond = peopleAhead === 2;
 
     const handleJoin = () => {
         setLocating(true);
@@ -150,9 +156,52 @@ const Queue: React.FC = () => {
                                             </Badge>
                                         </div>
                                     </div>
+
+                                    {/* Digital Ticket QR */}
+                                    <div className="mt-8 flex flex-col items-center">
+                                        <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-100">
+                                            <QRCode value={token.id} size={140} fgColor="#334155" />
+                                        </div>
+                                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-3 font-medium">Digital Ticket</p>
+                                    </div>
                                 </CardContent>
                             </Card>
                         </motion.div>
+
+
+                        {/* Position Notifications */}
+                        {(isNext || isSecond) && token.state === 'WAITING' && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mb-4"
+                            >
+                                <Card className={`border-l-4 ${isNext ? 'border-l-red-500 bg-red-50' : 'border-l-orange-500 bg-orange-50'} shadow-md`}>
+                                    <CardContent className="pt-4 flex items-start gap-4">
+                                        <Bell className={`w-6 h-6 mt-1 ${isNext ? 'text-red-600 animate-bounce' : 'text-orange-600'}`} />
+                                        <div>
+                                            <h3 className={`font-bold text-lg ${isNext ? 'text-red-700' : 'text-orange-700'}`}>
+                                                {isNext ? "You are NEXT! 🚨" : "You are 2nd in line! ⚠️"}
+                                            </h3>
+                                            <p className="text-sm text-muted-foreground mt-1 mb-3">
+                                                {isNext
+                                                    ? "Please verify your location immediately to avoid losing your spot."
+                                                    : "Please get ready and verify your location."}
+                                            </p>
+                                            <Button
+                                                size="sm"
+                                                onClick={handleVerify}
+                                                disabled={locating}
+                                                className={isNext ? "bg-red-600 hover:bg-red-700" : "bg-orange-600 hover:bg-orange-700"}
+                                            >
+                                                {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4 mr-2" />}
+                                                Verify Location Now
+                                            </Button>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
+                        )}
 
                         {/* State-specific cards */}
                         <AnimatePresence mode="wait">
@@ -312,7 +361,7 @@ const Queue: React.FC = () => {
                     </div>
                 )}
             </div>
-        </PageTransition>
+        </PageTransition >
     );
 };
 

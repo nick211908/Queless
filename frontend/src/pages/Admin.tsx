@@ -50,10 +50,21 @@ const Admin: React.FC = () => {
                 }
                 setService(svc);
 
-                // 2. Get Counter (Pick first free one or create dummy)
-                const { data: counters } = await supabase.from('counters').select('*').eq('service_id', serviceId).limit(1);
-                if (counters && counters.length > 0) {
-                    setCounterId(counters[0].id);
+                // 2. Get Counter via Backend (ensures existence and bypasses Client RLS issues)
+                try {
+                    const counterRes = await fetch('http://localhost:8000/api/v1/admin/ensure-counter', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ service_id: serviceId })
+                    });
+                    const counterJson = await counterRes.json();
+                    if (counterJson.success && counterJson.counter) {
+                        setCounterId(counterJson.counter.id);
+                    } else {
+                        console.error("Failed to ensure counter:", counterJson);
+                    }
+                } catch (cErr) {
+                    console.error("Network error ensuring counter:", cErr);
                 }
 
                 // 3. Get Active Tokens
@@ -68,9 +79,18 @@ const Admin: React.FC = () => {
         init();
 
         // Realtime Subs
-        const channel = supabase.channel('admin-view').on('postgres_changes', { event: '*', schema: 'public', table: 'tokens', filter: `service_id=eq.${serviceId}` }, () => {
-            fetchTokens();
-        }).subscribe();
+        const channel = supabase.channel('admin-view')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'tokens', filter: `service_id=eq.${serviceId}` }, () => {
+                fetchTokens();
+            })
+            // Add Service Subscription
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'services', filter: `id=eq.${serviceId}` }, (payload) => {
+                console.log("Service update received:", payload);
+                if (payload.new) {
+                    setService(payload.new as Service);
+                }
+            })
+            .subscribe();
 
         return () => { supabase.removeChannel(channel); };
     }, [serviceId]);
@@ -112,6 +132,7 @@ const Admin: React.FC = () => {
 
     const toggleService = async () => {
         if (!service) return;
+        console.log("Toggling service:", service.id, "Current Status:", service.status);
         const newStatus = service.status === 'OPEN' ? 'CLOSED' : 'OPEN';
 
         try {
@@ -123,16 +144,23 @@ const Admin: React.FC = () => {
 
             if (!res.ok) {
                 const errorData = await res.json();
+                console.error("Backend Error:", errorData);
                 throw new Error(errorData.detail || 'Failed to toggle service');
             }
 
             const json = await res.json();
+            console.log("Toggle Response:", json);
             if (!json.success) {
                 throw new Error(json.message || 'Backend reported failure');
             }
 
-            // Only update local state on success
-            setService(prev => prev ? { ...prev, status: newStatus as any } : null);
+            // Update local state immediately with returned data
+            if (json.data && json.data.length > 0) {
+                setService(json.data[0] as Service);
+            } else {
+                // Fallback if data not returned (though it should be)
+                setService(prev => prev ? { ...prev, status: newStatus as any } : null);
+            }
         } catch (err: any) {
             console.error('Toggle service error:', err);
             alert(`Failed to update service status: ${err.message}`);
@@ -249,12 +277,12 @@ const Admin: React.FC = () => {
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
                             Admin Console
                         </h1>
-                        <p className="text-muted-foreground flex items-center gap-2 mt-1">
+                        <div className="text-muted-foreground flex items-center gap-2 mt-1">
                             {service?.name}
                             <Badge variant={service?.status === 'OPEN' ? 'default' : 'secondary'} className={service?.status === 'OPEN' ? 'bg-green-500' : ''}>
                                 {service?.status}
                             </Badge>
-                        </p>
+                        </div>
                     </div>
                     <div className="flex gap-2">
                         <Button
