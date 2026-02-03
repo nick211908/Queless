@@ -64,3 +64,15 @@ class EntryScanRequest(BaseModel):
 class ExitScanRequest(BaseModel):
     token_id: UUID4
     exit_code: str # Simple validation string or QR content
+
+# --- Auth Models ---
+class AuthExchangeRequest(BaseModel):
+    access_token: str
+
+class ProfileResponse(BaseModel):
+    role: str
+
+class AuthResponse(BaseModel):
+    user_id: UUID4
+    email: Optional[str]
+    profile: ProfileResponse
